@@ -8,25 +8,34 @@ from handlers import admin
 from handlers.fsm_add_product import add_product_handlers
 from services.price_checker import price_check_scheduler
 from services.order_checker import order_check_scheduler
+from aiogram.client.default import DefaultBotProperties
+from utils.keyboards import main_kb
 
-async def admin_only(handler):
-    async def wrapper(message: types.Message, *args, **kwargs):
-        if message.from_user.id != ADMIN_ID:
+def admin_only(handler):
+    async def wrapper(*args, **kwargs):
+        message = None
+        for arg in args:
+            if isinstance(arg, types.Message):
+                message = arg
+                break
+        if not message:
+            message = kwargs.get('message')
+        if message and message.from_user.id != ADMIN_ID:
             await message.answer('⛔️ Доступ запрещён')
             return
-        return await handler(message, *args, **kwargs)
+        return await handler(*args, **kwargs)
     return wrapper
 
 async def main():
-    bot = Bot(token=BOT_TOKEN, parse_mode='HTML')
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(admin.router)
     await add_product_handlers(admin.router)
 
     @dp.message(Command('start'))
     @admin_only
-    async def start_cmd(message: types.Message):
-        await message.answer('👋 Привет! Это приватный Kaspi-бот.')
+    async def start_cmd(message: types.Message, **kwargs):
+        await message.answer('👋 Привет! Это приватный Kaspi-бот.', reply_markup=main_kb)
 
     logger.info('Бот запущен')
     asyncio.create_task(price_check_scheduler(bot))

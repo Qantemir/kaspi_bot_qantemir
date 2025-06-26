@@ -3,6 +3,7 @@ from aiogram import types, F
 from aiogram.fsm.context import FSMContext
 from database.db import db
 from database.models import PRODUCTS_COLLECTION
+from utils.keyboards import cancel_kb, main_kb
 
 class AddProduct(StatesGroup):
     name = State()
@@ -14,20 +15,20 @@ async def add_product_handlers(router):
     async def process_name(message: types.Message, state: FSMContext):
         await state.update_data(name=message.text)
         await state.set_state(AddProduct.link)
-        await message.answer('Вставьте ссылку на Kaspi:')
+        await message.answer('Вставьте ссылку на Kaspi:', reply_markup=cancel_kb)
 
     @router.message(AddProduct.link)
     async def process_link(message: types.Message, state: FSMContext):
         await state.update_data(link=message.text)
         await state.set_state(AddProduct.min_price)
-        await message.answer('Укажите минимальную допустимую цену (₸):')
+        await message.answer('Укажите минимальную допустимую цену (₸):', reply_markup=cancel_kb)
 
     @router.message(AddProduct.min_price)
     async def process_min_price(message: types.Message, state: FSMContext):
         try:
             min_price = int(message.text.replace(' ', ''))
         except ValueError:
-            await message.answer('Введите число!')
+            await message.answer('Введите число!', reply_markup=cancel_kb)
             return
         data = await state.get_data()
         product = {
@@ -38,5 +39,5 @@ async def add_product_handlers(router):
             'last_order_date': None
         }
         await db[PRODUCTS_COLLECTION].insert_one(product)
-        await message.answer(f"✅ Товар <b>{data['name']}</b> добавлен!")
+        await message.answer(f"✅ Товар <b>{data['name']}</b> добавлен!", reply_markup=main_kb)
         await state.clear() 
