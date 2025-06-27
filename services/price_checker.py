@@ -30,7 +30,10 @@ async def check_all_prices(bot):
             logger.info(f'Обновлена цена в БД для {name}: {price}')
             if last_price and price != last_price:
                 logger.info(f'Цена на {name} обновлена: было {last_price} → стало {price}')
-                await notify_admin(bot, f'ℹ️ Цена на <b>{name}</b> обновлена: было {last_price:,} → стало {price:,} ₸'.replace(',', ' '))
+                # Форматируем числа с пробелами
+                def fmt(num):
+                    return f'{num:,}'.replace(',', ' ')
+                await notify_admin(bot, f'ℹ️ Цена на <b>{name}</b> обновлена:\nБыло: {fmt(last_price)} ₸ → Стало: {fmt(price)} ₸')
         else:
             # Новый товар — добавляем в БД
             await db[PRODUCTS_COLLECTION].insert_one({
@@ -58,7 +61,9 @@ async def check_sleeping_products(bot):
             continue
         if last_dt < ten_days_ago:
             logger.info(f'Товар {product["name"]} давно не продавался (последний заказ: {last_dt})')
-            await notify_admin(bot, f'📉 Товар <b>{product["name"]}</b> давно не продаётся')
+            # Форматируем дату
+            last_dt_str = last_dt.strftime('%d.%m.%Y')
+            await notify_admin(bot, f'📉 Товар <b>{product["name"]}</b> давно не продаётся!\nПоследний заказ: {last_dt_str}')
 
 async def price_check_scheduler(bot):
     logger.info('Запуск фонового планировщика проверки цен')

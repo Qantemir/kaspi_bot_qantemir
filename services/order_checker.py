@@ -13,6 +13,10 @@ async def fetch_kaspi_orders():
         return orders
     except Exception as e:
         logger.error(f'Ошибка получения заказов через API: тип: {type(e).__name__}, ошибка: {e}')
+        await notify_admin(
+            bot=None,  # bot должен быть передан в вызывающей функции
+            text=f'❌ <b>Ошибка получения заказов через API:</b>\n<code>{e}</code>'
+        )
         return []
 
 async def check_orders(bot):
@@ -30,9 +34,20 @@ async def check_orders(bot):
             logger.info(f'Обновлен last_order_date для {order["product_name"]}')
             if order['status'] in ['На доставке', 'На упаковке']:
                 logger.info(f'Уведомление о новом заказе: {order}')
+                # Форматируем дату заказа
+                order_date = order.get('date', '')
+                if order_date:
+                    from datetime import datetime
+                    try:
+                        dt = order_date if isinstance(order_date, datetime) else datetime.fromisoformat(order_date)
+                        order_date_str = dt.strftime('%d.%m.%Y %H:%M')
+                    except Exception:
+                        order_date_str = str(order_date)
+                else:
+                    order_date_str = '-'
                 await notify_admin(
                     bot,
-                    f"🚚 Новый заказ в статусе '{order['status']}': <b>{order['product_name']}</b>, №{order['order_id']}"
+                    f"🚚 <b>Новый заказ!</b>\nТовар: <b>{order['product_name']}</b>\nСтатус: <b>{order['status']}</b>\n№{order['order_id']}\nДата: {order_date_str}"
                 )
 
 async def order_check_scheduler(bot):

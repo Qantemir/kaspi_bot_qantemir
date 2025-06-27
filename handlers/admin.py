@@ -26,7 +26,7 @@ async def block_non_admin(message: types.Message):
 async def cmd_add(message: types.Message, state: FSMContext):
     logger.info('Пользователь начал добавление товара')
     await state.set_state(AddProduct.name)
-    await message.answer('Введите название товара:', reply_markup=cancel_kb)
+    await message.answer('✏️ Введите <b>название товара</b> для отслеживания:', reply_markup=cancel_kb)
 
 @router.message(F.text == 'Список товаров')
 async def cmd_list(message: types.Message):
@@ -34,10 +34,10 @@ async def cmd_list(message: types.Message):
     products = await db[PRODUCTS_COLLECTION].find().to_list(100)
     if not products:
         logger.info('Список товаров пуст')
-        await message.answer('Список товаров пуст.', reply_markup=main_menu_kb())
+        await message.answer('📋 Список товаров пуст.', reply_markup=main_menu_kb())
         return
-    text = '\n'.join([f"{idx+1}. {p['name']} — {p.get('last_price', 'нет цены')} ₸" for idx, p in enumerate(products)])
-    await message.answer(f'<b>Товары:</b>\n{text}', reply_markup=main_menu_kb())
+    text = '\n'.join([f"{idx+1}. <b>{p['name']}</b> — {p.get('last_price', 'нет цены')} ₸" for idx, p in enumerate(products)])
+    await message.answer(f'📋 <b>Товары:</b>\n{text}', reply_markup=main_menu_kb())
 
 @router.message(F.text == 'Удалить товар')
 async def cmd_delete(message: types.Message, state: FSMContext):
@@ -45,37 +45,37 @@ async def cmd_delete(message: types.Message, state: FSMContext):
     products = await db[PRODUCTS_COLLECTION].find().to_list(100)
     if not products:
         logger.info('Список товаров пуст (удаление)')
-        await message.answer('Список товаров пуст.', reply_markup=main_menu_kb())
+        await message.answer('📋 Список товаров пуст.', reply_markup=main_menu_kb())
         return
-    text = '\n'.join([f"{idx+1}. {p['name']}" for idx, p in enumerate(products)])
+    text = '\n'.join([f"{idx+1}. <b>{p['name']}</b>" for idx, p in enumerate(products)])
     await state.update_data(products=products)
     await state.set_state('await_delete_number')
-    await message.answer(f'Выберите номер товара для удаления:\n{text}', reply_markup=cancel_kb)
+    await message.answer(f'🗑️ <b>Удаление товара</b>\nВыберите номер товара для удаления:\n{text}', reply_markup=cancel_kb)
 
 @router.message(F.text == 'Проверить цены')
 async def cmd_check_price(message: types.Message):
     logger.info('Пользователь инициировал проверку цен')
-    await message.answer('🔄 Проверяю цены... (реализуем позже)', reply_markup=main_menu_kb())
+    await message.answer('🔄 Проверяю цены... (скоро будет доступно)', reply_markup=main_menu_kb())
 
 @router.message(F.text == 'Проверить заказы')
 async def cmd_check_orders(message: types.Message, bot):
     logger.info('Пользователь инициировал проверку заказов')
     await message.answer('🔄 Проверяю заказы...', reply_markup=main_menu_kb())
     await check_orders(bot)
-    await message.answer('✅ Проверка заказов завершена.', reply_markup=main_menu_kb())
+    await message.answer('✅ Заказы проверены!', reply_markup=main_menu_kb())
 
 @router.message(F.text == '❌ Отмена')
 async def cancel_any(message: types.Message, state: FSMContext):
     logger.info('Пользователь отменил действие')
     await state.clear()
-    await message.answer('Действие отменено.', reply_markup=main_menu_kb())
+    await message.answer('❌ Действие отменено.', reply_markup=main_menu_kb())
 
 @router.message(F.state == 'await_delete_number')
 async def process_delete_number(message: types.Message, state: FSMContext):
     if message.text == '❌ Отмена':
         logger.info('Пользователь отменил удаление товара')
         await state.clear()
-        await message.answer('Удаление отменено.', reply_markup=main_menu_kb())
+        await message.answer('❌ Удаление отменено.', reply_markup=main_menu_kb())
         return
     data = await state.get_data()
     products = data.get('products', [])
@@ -84,7 +84,7 @@ async def process_delete_number(message: types.Message, state: FSMContext):
         assert 0 <= idx < len(products)
     except (ValueError, AssertionError):
         logger.warning('Пользователь ввёл некорректный номер товара для удаления')
-        await message.answer('Введите корректный номер!', reply_markup=cancel_kb)
+        await message.answer('⚠️ Введите корректный номер!', reply_markup=cancel_kb)
         return
     product = products[idx]
     logger.info(f'Пользователь выбрал товар для удаления: {product["name"]}')
@@ -97,7 +97,7 @@ async def process_delete_confirm(message: types.Message, state: FSMContext):
     if message.text == '❌ Отмена' or message.text == 'Нет':
         logger.info('Пользователь отменил подтверждение удаления товара')
         await state.clear()
-        await message.answer('Удаление отменено.', reply_markup=main_menu_kb())
+        await message.answer('❌ Удаление отменено.', reply_markup=main_menu_kb())
         return
     if message.text == 'Да':
         data = await state.get_data()
@@ -110,7 +110,7 @@ async def process_delete_confirm(message: types.Message, state: FSMContext):
             await message.answer(f"🗑️ Товар <b>{product['name']}</b> удалён!", reply_markup=main_menu_kb())
         else:
             logger.error('Ошибка удаления товара: индекс вне диапазона')
-            await message.answer('Ошибка удаления.', reply_markup=main_menu_kb())
+            await message.answer('⚠️ Ошибка удаления.', reply_markup=main_menu_kb())
         await state.clear()
     else:
         logger.warning('Пользователь не выбрал Да/Нет при подтверждении удаления')
@@ -120,27 +120,27 @@ async def process_delete_confirm(message: types.Message, state: FSMContext):
 @router.message(F.text == '⬅️ В меню')
 async def back_to_main_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer('📱 Главное меню', reply_markup=main_menu_kb())
+    await message.answer('📱 <b>Главное меню</b>', reply_markup=main_menu_kb())
 
 @router.message(F.text == '📦 Заказы')
 async def orders_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer('📦 Раздел «Заказы»', reply_markup=await orders_menu_kb())
+    await message.answer('📦 <b>Раздел «Заказы»</b>', reply_markup=await orders_menu_kb())
 
 @router.message(F.text == '📉 Цены')
 async def prices_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer('📉 Раздел «Цены»', reply_markup=prices_menu_kb())
+    await message.answer('📉 <b>Раздел «Цены»</b>', reply_markup=prices_menu_kb())
 
 @router.message(F.text == '📄 Накладные')
 async def invoices_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer('📄 Раздел «Накладные»', reply_markup=invoices_menu_kb())
+    await message.answer('📄 <b>Раздел «Накладные»</b>', reply_markup=invoices_menu_kb())
 
 @router.message(F.text == '⚙️ Настройки')
 async def settings_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer('⚙️ Раздел «Настройки»', reply_markup=settings_menu_kb())
+    await message.answer('⚙️ <b>Раздел «Настройки»</b>', reply_markup=settings_menu_kb())
 
 # Заказы
 @router.message(F.text == '📬 Проверить заказы сейчас')
