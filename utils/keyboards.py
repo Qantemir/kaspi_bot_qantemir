@@ -1,26 +1,76 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text='/add'), KeyboardButton(text='/list')],
-        [KeyboardButton(text='/delete'), KeyboardButton(text='/check_price')],
-        [KeyboardButton(text='/check_orders')],
-    ],
-    resize_keyboard=True
-)
+def main_menu_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='📦 Заказы'), KeyboardButton(text='📉 Цены')],
+            [KeyboardButton(text='📄 Накладные'), KeyboardButton(text='⚙️ Настройки')],
+        ],
+        resize_keyboard=True
+    )
+
+def orders_menu_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='📬 Проверить заказы сейчас')],
+            [KeyboardButton(text='🔔 Включить уведомления каждый час')],
+            [KeyboardButton(text='⬅️ В меню')],
+        ],
+        resize_keyboard=True
+    )
+
+def prices_menu_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='➕ Добавить товар на отслеживание')],
+            [KeyboardButton(text='📋 Список отслеживаемых товаров')],
+            [KeyboardButton(text='⏰ Установить интервал проверки цен')],
+            [KeyboardButton(text='🔔 Оповещать если не в топ-1')],
+            [KeyboardButton(text='⬅️ В меню')],
+        ],
+        resize_keyboard=True
+    )
+
+def prices_interval_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='Раз в час')],
+            [KeyboardButton(text='Каждые 30 мин')],
+            [KeyboardButton(text='Раз в день')],
+            [KeyboardButton(text='⬅️ Назад')],
+        ],
+        resize_keyboard=True
+    )
+
+def invoices_menu_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='🧾 Сформировать накладную')],
+            [KeyboardButton(text='⬇️ Скачать все накладные')],
+            [KeyboardButton(text='⬅️ В меню')],
+        ],
+        resize_keyboard=True
+    )
+
+def settings_menu_kb():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text='⏱ Настроить интервал уведомлений о заказах')],
+            [KeyboardButton(text='⬅️ В меню')],
+        ],
+        resize_keyboard=True
+    )
 
 cancel_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text='❌ Отмена')]],
     resize_keyboard=True,
-    one_time_keyboard=True
+    one_time_keyboard=True,
+    input_field_placeholder='Для отмены нажмите кнопку'
 )
 
-def delete_confirm_kb(product_name):
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text=f'Удалить {product_name}', callback_data='confirm_delete'),
-                InlineKeyboardButton(text='Отмена', callback_data='cancel_delete')
-            ]
-        ]
-    ) 
+confirm_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text='Да'), KeyboardButton(text='Нет')]],
+    resize_keyboard=True,
+    one_time_keyboard=True,
+    input_field_placeholder='Подтвердите действие'
+) 

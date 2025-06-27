@@ -9,7 +9,8 @@ from handlers.fsm_add_product import add_product_handlers
 from services.price_checker import price_check_scheduler
 from services.order_checker import order_check_scheduler
 from aiogram.client.default import DefaultBotProperties
-from utils.keyboards import main_kb
+from utils.keyboards import main_menu_kb
+from handlers.admin import init_all_settings
 
 def admin_only(handler):
     async def wrapper(*args, **kwargs):
@@ -35,9 +36,10 @@ async def main():
     @dp.message(Command('start'))
     @admin_only
     async def start_cmd(message: types.Message, **kwargs):
-        await message.answer('👋 Привет! Это приватный Kaspi-бот.', reply_markup=main_kb)
+        await message.answer('👋 Привет! Это приватный Kaspi-бот.', reply_markup=main_menu_kb())
 
     logger.info('Бот запущен')
+    await init_all_settings(bot)
     asyncio.create_task(price_check_scheduler(bot))
     asyncio.create_task(order_check_scheduler(bot))
     await dp.start_polling(bot)
