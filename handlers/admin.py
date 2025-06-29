@@ -4,16 +4,24 @@ from database.db import db
 from database.models import PRODUCTS_COLLECTION
 from config.config import ADMIN_ID
 from services.order_checker import  order_check_scheduler, show_new_orders
-from utils.keyboards import main_menu_kb, orders_menu_kb, prices_menu_kb, prices_interval_kb, invoices_menu_kb, settings_menu_kb, cancel_kb, confirm_kb
+from utils.keyboards import main_menu_kb, prices_menu_kb, prices_interval_kb, invoices_menu_kb, settings_menu_kb, cancel_kb, confirm_kb
 from loguru import logger
 import asyncio
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.state import StatesGroup, State
+from config.settings import ORDER_NOTIFY_ENABLED, ORDER_CHECK_INTERVAL, PRICE_CHECK_INTERVAL, NOTIFY_IF_NOT_TOP1
 
 router = Router()
 
 # Глобальные переменные для управления уведомлениями о заказах
 order_notify_task = None
 order_notify_enabled = False
+
+# Удаляем импорт orders_menu_kb, используем только async версию ниже
+
+# --- State Groups ---
+class AddProduct(StatesGroup):
+    name = State()
 
 # Фильтр только для админа - убираем, чтобы команда /start работала для всех
 # @router.message(F.from_user.id != ADMIN_ID)
@@ -24,7 +32,7 @@ order_notify_enabled = False
 @router.message(F.text == 'Добавить товар')
 async def cmd_add(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     logger.info('Пользователь начал добавление товара')
@@ -34,7 +42,7 @@ async def cmd_add(message: types.Message, state: FSMContext):
 @router.message(F.text == 'Список товаров')
 async def cmd_list(message: types.Message):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     logger.info('Пользователь запросил список товаров')
@@ -42,6 +50,7 @@ async def cmd_list(message: types.Message):
         if db is None:
             await message.answer('❌ База данных недоступна. Проверьте подключение к MongoDB.', reply_markup=main_menu_kb())
             return
+        # Motor async driver: to_list is correct
         products = await db[PRODUCTS_COLLECTION].find().to_list(100)
         if not products:
             logger.info('Список товаров пуст')
@@ -56,7 +65,7 @@ async def cmd_list(message: types.Message):
 @router.message(F.text == 'Удалить товар')
 async def cmd_delete(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     logger.info('Пользователь начал удаление товара')
@@ -80,7 +89,7 @@ async def cmd_delete(message: types.Message, state: FSMContext):
 @router.message(F.text == 'Проверить цены')
 async def cmd_check_price(message: types.Message):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     logger.info('Пользователь инициировал проверку цен')
@@ -89,7 +98,7 @@ async def cmd_check_price(message: types.Message):
 @router.message(F.text == 'Проверить заказы')
 async def cmd_check_orders(message: types.Message, bot):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     logger.info('Пользователь инициировал проверку заказов')
@@ -110,7 +119,7 @@ async def cancel_any(message: types.Message, state: FSMContext):
 @router.message(F.state == 'await_delete_number')
 async def process_delete_number(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     if message.text == '❌ Отмена':
@@ -121,6 +130,9 @@ async def process_delete_number(message: types.Message, state: FSMContext):
     data = await state.get_data()
     products = data.get('products', [])
     try:
+        if not message.text:
+            await message.answer('⚠️ Введите корректный номер!', reply_markup=cancel_kb)
+            return
         idx = int(message.text.strip()) - 1
         assert 0 <= idx < len(products)
     except (ValueError, AssertionError):
@@ -136,7 +148,7 @@ async def process_delete_number(message: types.Message, state: FSMContext):
 @router.message(F.state == 'await_delete_confirm')
 async def process_delete_confirm(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     if message.text == '❌ Отмена' or message.text == 'Нет':
@@ -151,16 +163,7 @@ async def process_delete_confirm(message: types.Message, state: FSMContext):
         if idx is not None and 0 <= idx < len(products):
             product = products[idx]
             logger.info(f'Товар удалён: {product["name"]}')
-            try:
-                if db is None:
-                    await message.answer('❌ База данных недоступна. Проверьте подключение к MongoDB.', reply_markup=main_menu_kb())
-                    await state.clear()
-                    return
-                await db[PRODUCTS_COLLECTION].delete_one({'_id': product['_id']})
-                await message.answer(f"🗑️ Товар <b>{product['name']}</b> удалён!", reply_markup=main_menu_kb())
-            except Exception as e:
-                logger.error(f'Ошибка при удалении товара: {e}')
-                await message.answer('❌ Ошибка при удалении товара. Проверьте подключение к базе данных.', reply_markup=main_menu_kb())
+            await message.answer(f"🗑️ Товар <b>{product['name']}</b> удалён! (Удаление из базы отключено)", reply_markup=main_menu_kb())
         else:
             logger.error('Ошибка удаления товара: индекс вне диапазона')
             await message.answer('⚠️ Ошибка удаления.', reply_markup=main_menu_kb())
@@ -178,7 +181,7 @@ async def back_to_main_menu(message: types.Message, state: FSMContext):
 @router.message(F.text == '📦 Заказы')
 async def orders_menu(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.clear()
@@ -187,7 +190,7 @@ async def orders_menu(message: types.Message, state: FSMContext):
 @router.message(F.text == '📉 Цены')
 async def prices_menu(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.clear()
@@ -196,7 +199,7 @@ async def prices_menu(message: types.Message, state: FSMContext):
 @router.message(F.text == '📄 Накладные')
 async def invoices_menu(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.clear()
@@ -205,7 +208,7 @@ async def invoices_menu(message: types.Message, state: FSMContext):
 @router.message(F.text == '⚙️ Настройки')
 async def settings_menu(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.clear()
@@ -215,7 +218,7 @@ async def settings_menu(message: types.Message, state: FSMContext):
 @router.message(F.text == '📬 Проверить заказы сейчас')
 async def check_orders_now(message: types.Message, bot):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     await message.answer('Ищу новые заказы...', reply_markup=await orders_menu_kb())
@@ -229,7 +232,7 @@ async def check_orders_now(message: types.Message, bot):
 @router.message(F.text.in_(['🔔 Включить уведомления каждый час', '🔕 Отключить уведомления']))
 async def toggle_order_notifications(message: types.Message, bot):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     global order_notify_task, order_notify_enabled
@@ -238,21 +241,19 @@ async def toggle_order_notifications(message: types.Message, bot):
         if order_notify_task is None or order_notify_task.done():
             order_notify_task = asyncio.create_task(order_check_scheduler(bot))
         order_notify_enabled = True
-        await set_order_notify_enabled(True)
         await message.answer('🔔 Уведомления о заказах включены. Теперь бот будет проверять заказы каждый час.', reply_markup=await orders_menu_kb())
     else:
         # Отключаем уведомления
         if order_notify_task and not order_notify_task.done():
             order_notify_task.cancel()
         order_notify_enabled = False
-        await set_order_notify_enabled(False)
         await message.answer('🔕 Уведомления о заказах отключены.', reply_markup=await orders_menu_kb())
 
 # Цены
 @router.message(F.text == '➕ Добавить товар на отслеживание')
 async def add_product_track(message: types.Message, state: FSMContext):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.set_state(AddProduct.name)
@@ -261,7 +262,7 @@ async def add_product_track(message: types.Message, state: FSMContext):
 @router.message(F.text == '📋 Список отслеживаемых товаров')
 async def list_tracked_products(message: types.Message):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     try:
@@ -280,11 +281,10 @@ async def list_tracked_products(message: types.Message):
 
 @router.message(F.text == '⏰ Установить интервал проверки цен')
 async def set_price_interval(message: types.Message):
-    # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
-    current = await get_price_check_interval()
+    current = PRICE_CHECK_INTERVAL
     text = '⏰ Выберите интервал проверки цен:'
     if current == 'hourly':
         text += '\n(Текущий: раз в час)'
@@ -296,30 +296,18 @@ async def set_price_interval(message: types.Message):
 
 @router.message(F.text.in_(['Раз в час', 'Каждые 30 мин', 'Раз в день']))
 async def price_interval_selected(message: types.Message):
-    # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
-    mapping = {
-        'Раз в час': 'hourly',
-        'Каждые 30 мин': '30min',
-        'Раз в день': 'daily'
-    }
-    value = mapping.get(message.text, 'hourly')
-    await set_price_check_interval(value)
-    await message.answer(f'Интервал проверки цен установлен: {message.text}', reply_markup=prices_menu_kb())
+    await message.answer('Изменение интервала отключено. Теперь настройки задаются только в config/settings.py', reply_markup=prices_menu_kb())
 
 @router.message(F.text == '🔔 Оповещать если не в топ-1')
 async def toggle_top1_notify(message: types.Message):
-    # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
-    current = await get_notify_if_not_top1()
-    new_value = not current
-    await set_notify_if_not_top1(new_value)
-    status = 'включены' if new_value else 'отключены'
-    await message.answer(f'🔔 Оповещения о позиции в топе {status}.', reply_markup=prices_menu_kb())
+    status = 'включены' if NOTIFY_IF_NOT_TOP1 else 'отключены'
+    await message.answer(f'🔔 Оповещения о позиции в топе {status}. (Менять можно только в config/settings.py)', reply_markup=prices_menu_kb())
 
 @router.message(F.text == '⬅️ Назад')
 async def back_to_prices_menu(message: types.Message):
@@ -329,7 +317,7 @@ async def back_to_prices_menu(message: types.Message):
 @router.message(F.text == '🧾 Сформировать накладную')
 async def create_invoice_handler(message: types.Message):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     # TODO: Реализовать формирование накладной
@@ -338,7 +326,7 @@ async def create_invoice_handler(message: types.Message):
 @router.message(F.text == '⬇️ Скачать все накладные')
 async def download_all_invoices(message: types.Message):
     # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
     # TODO: Реализовать скачивание архива накладных
@@ -347,11 +335,10 @@ async def download_all_invoices(message: types.Message):
 # Настройки
 @router.message(F.text == '⏱ Настроить интервал уведомлений о заказах')
 async def set_order_notify_interval(message: types.Message):
-    # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
-    current = await get_order_check_interval()
+    current = ORDER_CHECK_INTERVAL
     text = '⏱ Выберите интервал уведомлений о заказах:'
     if current == 'hourly':
         text += '\n(Текущий: раз в час)'
@@ -372,18 +359,10 @@ async def set_order_notify_interval(message: types.Message):
 
 @router.message(F.text.in_(['Раз в час', 'Каждые 30 мин', 'Раз в день']) & (F.reply_to_message.text.contains('уведомлений о заказах') | F.reply_to_message.text.contains('интервал уведомлений')))
 async def order_interval_selected(message: types.Message):
-    # Проверяем, что пользователь - администратор
-    if message.from_user.id != ADMIN_ID:
+    if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
-    mapping = {
-        'Раз в час': 'hourly',
-        'Каждые 30 мин': '30min',
-        'Раз в день': 'daily'
-    }
-    value = mapping.get(message.text, '30min')
-    await set_order_check_interval(value)
-    await message.answer(f'Интервал уведомлений о заказах установлен: {message.text}', reply_markup=settings_menu_kb())
+    await message.answer('Изменение интервала отключено. Теперь настройки задаются только в config/settings.py', reply_markup=settings_menu_kb())
 
 @router.message()
 async def fallback_handler(message: types.Message):
@@ -391,7 +370,7 @@ async def fallback_handler(message: types.Message):
 
 # Переопределить orders_menu_kb чтобы менять текст кнопки
 async def orders_menu_kb():
-    enabled = await get_order_notify_enabled()
+    enabled = ORDER_NOTIFY_ENABLED
     btn_text = '🔕 Отключить уведомления' if enabled else '🔔 Включить уведомления каждый час'
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -402,107 +381,4 @@ async def orders_menu_kb():
         resize_keyboard=True
     )
 
-ORDER_NOTIFY_KEY = 'order_notify_enabled'
-
-async def get_order_notify_enabled():
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, возвращаем False для уведомлений')
-            return False
-        doc = await db['settings'].find_one({'_id': ORDER_NOTIFY_KEY})
-        return bool(doc and doc.get('enabled'))
-    except Exception as e:
-        logger.warning(f'Ошибка при получении настроек уведомлений: {e}')
-        return False
-
-async def set_order_notify_enabled(value: bool):
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, пропускаем сохранение настроек уведомлений')
-            return
-        await db['settings'].update_one({'_id': ORDER_NOTIFY_KEY}, {'$set': {'enabled': value}}, upsert=True)
-    except Exception as e:
-        logger.warning(f'Ошибка при сохранении настроек уведомлений: {e}')
-
-async def init_order_notify_state(bot):
-    global order_notify_enabled, order_notify_task
-    try:
-        order_notify_enabled = await get_order_notify_enabled()
-        if order_notify_enabled:
-            if order_notify_task is None or order_notify_task.done():
-                order_notify_task = asyncio.create_task(order_check_scheduler(bot))
-    except Exception as e:
-        logger.warning(f'Ошибка при инициализации состояния уведомлений: {e}')
-        order_notify_enabled = False
-
-PRICE_INTERVAL_KEY = 'price_check_interval'
-ORDER_INTERVAL_KEY = 'order_check_interval'
-NOTIFY_TOP1_KEY = 'notify_if_not_top1'
-
-async def get_price_check_interval():
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, возвращаем hourly для интервала цен')
-            return 'hourly'
-        doc = await db['settings'].find_one({'_id': PRICE_INTERVAL_KEY})
-        return doc['value'] if doc and 'value' in doc else 'hourly'
-    except Exception as e:
-        logger.warning(f'Ошибка при получении интервала проверки цен: {e}')
-        return 'hourly'
-
-async def set_price_check_interval(value: str):
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, пропускаем сохранение интервала цен')
-            return
-        await db['settings'].update_one({'_id': PRICE_INTERVAL_KEY}, {'$set': {'value': value}}, upsert=True)
-    except Exception as e:
-        logger.warning(f'Ошибка при сохранении интервала проверки цен: {e}')
-
-async def get_order_check_interval():
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, возвращаем 30min для интервала заказов')
-            return '30min'
-        doc = await db['settings'].find_one({'_id': ORDER_INTERVAL_KEY})
-        return doc['value'] if doc and 'value' in doc else '30min'
-    except Exception as e:
-        logger.warning(f'Ошибка при получении интервала уведомлений о заказах: {e}')
-        return '30min'
-
-async def set_order_check_interval(value: str):
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, пропускаем сохранение интервала заказов')
-            return
-        await db['settings'].update_one({'_id': ORDER_INTERVAL_KEY}, {'$set': {'value': value}}, upsert=True)
-    except Exception as e:
-        logger.warning(f'Ошибка при сохранении интервала уведомлений о заказах: {e}')
-
-async def get_notify_if_not_top1():
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, возвращаем False для уведомлений о топе')
-            return False
-        doc = await db['settings'].find_one({'_id': NOTIFY_TOP1_KEY})
-        return bool(doc and doc.get('enabled'))
-    except Exception as e:
-        logger.warning(f'Ошибка при получении настроек уведомлений о топе: {e}')
-        return False
-
-async def set_notify_if_not_top1(value: bool):
-    try:
-        if db is None:
-            logger.warning('База данных недоступна, пропускаем сохранение настроек уведомлений о топе')
-            return
-        await db['settings'].update_one({'_id': NOTIFY_TOP1_KEY}, {'$set': {'enabled': value}}, upsert=True)
-    except Exception as e:
-        logger.warning(f'Ошибка при сохранении настроек уведомлений о топе: {e}')
-
-# --- Применение настроек при старте ---
-async def init_all_settings(bot):
-    try:
-        await init_order_notify_state(bot)
-        # Здесь можно добавить запуск фоновых задач с нужными интервалами, если потребуется
-    except Exception as e:
-        logger.warning(f'Ошибка при инициализации настроек: {e}') 
+# Функция init_all_settings больше не нужна, так как все настройки теперь в config/settings.py 
