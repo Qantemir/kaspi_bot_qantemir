@@ -60,6 +60,7 @@ async def get_orders(page=0, size=20, state=None, status=None, date_from=None, d
         try:
             resp = await client.get(url, headers=headers, params=params)
             logger.info(f'Получен ответ от API: статус {resp.status_code}')
+            logger.info(f'Текст ответа от Kaspi API: {resp.text}')
             
             if resp.status_code == 401:
                 logger.error('Ошибка авторизации: неверный API ключ')
@@ -118,7 +119,8 @@ async def get_orders(page=0, size=20, state=None, status=None, date_from=None, d
                         'deliveryAddress': attributes.get('deliveryAddress', {}),
                         'pickupPoint': attributes.get('pickupPoint', {}),
                         'comment': attributes.get('comment', ''),
-                        'entries': entries
+                        'entries': entries,
+                        'waybillNumber': attributes.get('waybillNumber'),
                     }
                     orders.append(order)
                     logger.info(f'Обработан заказ: {order["code"]} - {order["status"]} - {order["state"]}')
@@ -140,50 +142,6 @@ async def get_orders(page=0, size=20, state=None, status=None, date_from=None, d
             logger.error(f'Тип ошибки: {type(e).__name__}')
             return []
 
-async def get_active_orders():
-    """
-    Получение активных заказов (новых, одобренных банком, принятых и готовых к доставке)
-    """
-    logger.info('Начинаем получение активных заказов...')
-    
-    # Получаем новые заказы по состоянию NEW
-    logger.info('Запрашиваем заказы с состоянием NEW...')
-    new_orders = await get_orders(
-        state='NEW'
-    )
-    
-    # Получаем заказы, одобренные банком (продавец должен их принять)
-    logger.info('Запрашиваем заказы со статусом APPROVED_BY_BANK...')
-    approved_orders = await get_orders(
-        status='APPROVED_BY_BANK'
-    )
-    
-    # Получаем заказы на самовывоз (ваша доставка)
-    logger.info('Запрашиваем заказы на самовывоз (PICKUP)...')
-    pickup_orders = await get_orders(
-        status='ACCEPTED_BY_MERCHANT',
-        delivery_type='PICKUP'
-    )
-    
-    # Получаем заказы со статусом ACCEPTED_BY_MERCHANT и состоянием DELIVERY
-    logger.info('Запрашиваем заказы со статусом ACCEPTED_BY_MERCHANT и состоянием DELIVERY...')
-    delivery_orders = await get_orders(
-        status='ACCEPTED_BY_MERCHANT',
-        state='DELIVERY'
-    )
-    
-    # Также получаем заказы с Kaspi Доставкой
-    logger.info('Запрашиваем заказы со статусом ACCEPTED_BY_MERCHANT и состоянием KASPI_DELIVERY...')
-    kaspi_orders = await get_orders(
-        status='ACCEPTED_BY_MERCHANT', 
-        state='KASPI_DELIVERY'
-    )
-    
-    # Объединяем результаты
-    all_orders = new_orders + approved_orders + pickup_orders + delivery_orders + kaspi_orders
-    logger.info(f'Найдено {len(all_orders)} активных заказов (NEW: {len(new_orders)}, APPROVED_BY_BANK: {len(approved_orders)}, PICKUP: {len(pickup_orders)}, DELIVERY: {len(delivery_orders)}, KASPI_DELIVERY: {len(kaspi_orders)})')
-    
-    return all_orders
 
 async def update_product_price(product_id: str, new_price: int):
     url = KASPI_API_URL + f'products/{product_id}/price'

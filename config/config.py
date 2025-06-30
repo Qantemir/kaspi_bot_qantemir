@@ -15,4 +15,4 @@ KASPI_API = os.getenv('KASPI_API')
 ORDER_CHECK_INTERVAL = 3600  # 1 час
 
 # За сколько дней назад искать новые заказы
-ORDER_LOOKBACK_DAYS = 3 
+ORDER_LOOKBACK_DAYS = 14

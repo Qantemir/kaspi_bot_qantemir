@@ -1,19 +1,26 @@
 import asyncio
 from loguru import logger
 from datetime import datetime, timedelta
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from utils.notifications import notify_admin
 from services.kaspi_api import get_orders
 from config.config import ORDER_CHECK_INTERVAL, ORDER_LOOKBACK_DAYS
+from config.settings import ORDER_LOOKBACK_DAYS
 
 
-async def safe_notify(bot, message: str):
-    """Безопасная отправка уведомлений"""
+async def safe_notify(bot, message: str, reply_markup=None):
+    """
+    Безопасная отправка уведомлений администратору через Telegram
+    """
     if bot:
-        await notify_admin(bot, message)
+        await notify_admin(bot, message, reply_markup=reply_markup)
 
 
 def format_order_date(order_date) -> str:
+    """
+    Преобразует дату из timestamp или строки в читаемый формат дд.мм.гггг чч:мм
+    """
     if not order_date:
         return "-"
     try:
@@ -29,6 +36,9 @@ def format_order_date(order_date) -> str:
 
 
 def format_address(address: dict) -> str:
+    """
+    Форматирует адрес в строку
+    """
     if not address:
         return ""
     parts = []
@@ -44,6 +54,9 @@ def format_address(address: dict) -> str:
 
 
 def format_products(products: list, fallback: str = 'Товар') -> str:
+    """
+    Форматирует список товаров в виде: 1. Название xКол-во = Цена
+    """
     if not products:
         return fallback
     lines = []
@@ -56,6 +69,9 @@ def format_products(products: list, fallback: str = 'Товар') -> str:
 
 
 def get_delivery_text(state, status) -> tuple[str, str]:
+    """
+    Возвращает описание и эмодзи типа доставки
+    """
     if state == 'NEW':
         return '🆕 Новый заказ', '🆕'
     elif status == 'APPROVED_BY_BANK':
@@ -64,12 +80,13 @@ def get_delivery_text(state, status) -> tuple[str, str]:
         return '🚚 Ваша доставка', '🚚'
     elif state == 'KASPI_DELIVERY':
         return '📦 Kaspi Доставка', '📦'
-    else:
-        return '📋 Готов к выдаче', '📋'
+    return '📋 Готов к выдаче', '📋'
 
 
 async def show_order_notification(bot, order):
-    """Формирует и отправляет уведомление об одном заказе"""
+    """
+    Формирует и отправляет уведомление об одном заказе администратору
+    """
     order_date_str = format_order_date(order.get('date'))
 
     customer = order.get('customer', {})
@@ -122,35 +139,55 @@ async def show_order_notification(bot, order):
         f"{signature_text}"
     )
 
-    await safe_notify(bot, message)
+    # Формируем кнопку в зависимости от состояния
+    assembled = order.get('assembled')
+    courier_transmission = order.get('courierTransmissionDate')
+
+    if assembled is False and courier_transmission is None:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='Сформировать накладную', callback_data=f'create_invoice:{order.get("order_id") or order.get("code")}')
+        ]])
+        await safe_notify(bot, message, reply_markup=kb)
+    elif assembled is True and courier_transmission is None:
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text='Скачать накладную', callback_data=f'download_invoice:{order.get("order_id") or order.get("code")}')
+        ]])
+        await safe_notify(bot, message, reply_markup=kb)
+    else:
+        await safe_notify(bot, message)
 
 
-async def show_new_orders(bot):
-    """Показывает все заказы со state='NEW' прямо из API без проверки базы данных"""
-    logger.info('Запрос заказов (state=NEW)')
+async def show_new_orders(bot, date_from=None):
+    """
+    Запрашивает новые заказы со state='KASPI_DELIVERY' и отправляет уведомления
+    """
+    logger.info('Запрос заказов (state=SIGN_REQUIRED)')
+    if date_from is None:
+        date_from = (datetime.now() + timedelta(days=1) - timedelta(days=ORDER_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+
     try:
-        date_from = (datetime.now() - timedelta(days=ORDER_LOOKBACK_DAYS)).strftime('%Y-%m-%d')
-        new_orders = await get_orders(state='NEW', date_from=date_from)
+        new_orders = await get_orders(state='KASPI_DELIVERY', date_from=date_from)
 
         if not new_orders:
-            logger.info('Новых заказов не найдено')
             await safe_notify(bot, "📭 <b>Новых заказов не найдено</b>")
             return
 
-        logger.info(f'Найдено {len(new_orders)} новых заказов')
         for order in new_orders:
+            if order.get('assembled') is not False or order.get('courierTransmissionDate') is not None:
+                continue  # Пропускаем, если уже собран или передан
             await show_order_notification(bot, order)
 
     except Exception as e:
-        logger.exception('Ошибка при получении заказов')
         await safe_notify(bot, f"❌ Ошибка при получении заказов: {e}")
 
 
 async def order_check_scheduler(bot):
-    logger.info('⏳ Запуск планировщика проверки заказов (каждые %s сек)', ORDER_CHECK_INTERVAL)
+    """
+    Планировщик регулярной проверки новых заказов
+    """
     while True:
         try:
             await show_new_orders(bot)
         except Exception as e:
-            logger.exception(f'Ошибка в планировщике заказов: {e}')
+            await safe_notify(bot, f"❌ Ошибка в планировщике: {e}")
         await asyncio.sleep(ORDER_CHECK_INTERVAL)

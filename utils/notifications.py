@@ -1,7 +1,8 @@
 from aiogram import Bot, types
 from config.config import ADMIN_ID
- 
-async def notify_admin(bot: Bot, text: str, reply_markup: types.ReplyKeyboardMarkup = None):
+from typing import Optional
+
+async def notify_admin(bot: Bot, text: str, reply_markup: Optional['types.ReplyKeyboardMarkup | types.InlineKeyboardMarkup'] = None):
     """
     Отправляет уведомление админу в дружелюбном стиле.
     Пример:

@@ -10,6 +10,7 @@ import asyncio
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import StatesGroup, State
 from config.settings import ORDER_NOTIFY_ENABLED, ORDER_CHECK_INTERVAL, PRICE_CHECK_INTERVAL, NOTIFY_IF_NOT_TOP1
+from datetime import datetime, timedelta
 
 router = Router()
 
@@ -104,7 +105,8 @@ async def cmd_check_orders(message: types.Message, bot):
     logger.info('Пользователь инициировал проверку заказов')
     await message.answer('Ищу новые заказы...', reply_markup=main_menu_kb())
     try:
-        await show_new_orders(bot)
+        date_from = (datetime.now() + timedelta(days=1) - timedelta(days=3)).strftime('%Y-%m-%d')
+        await show_new_orders(bot, date_from=date_from)
         await message.answer('', reply_markup=main_menu_kb())
     except Exception as e:
         logger.error(f'Ошибка при проверке заказов: {e}')
@@ -223,7 +225,8 @@ async def check_orders_now(message: types.Message, bot):
         return
     await message.answer('Ищу новые заказы...', reply_markup=await orders_menu_kb())
     try:
-        await show_new_orders(bot)
+        date_from = (datetime.now() + timedelta(days=1) - timedelta(days=3)).strftime('%Y-%m-%d')
+        await show_new_orders(bot, date_from=date_from)
         await message.answer('Готово! Если появятся новые заказы, вы увидите их здесь.', reply_markup=await orders_menu_kb())
     except Exception as e:
         logger.error(f'Ошибка при проверке заказов: {e}')
