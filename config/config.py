@@ -12,7 +12,9 @@ MONGO_URI = os.getenv('MONGO_URI')
 KASPI_API = os.getenv('KASPI_API')
 
 # Интервал проверки заказов (в секундах)
-ORDER_CHECK_INTERVAL = 3600  # 1 час
+ORDER_CHECK_INTERVAL = 3600  # Интервал проверки заказов в секундах (например, 3600 = 1 час)
+PRICE_CHECK_INTERVAL = 'hourly'
+NOTIFY_IF_NOT_TOP1 = False
+ORDER_LOOKBACK_DAYS = 4  # Количество дней, за которые ищутся заказы
 
-# За сколько дней назад искать новые заказы
-ORDER_LOOKBACK_DAYS = 14
+ORDER_NOTIFY_ENABLED = True

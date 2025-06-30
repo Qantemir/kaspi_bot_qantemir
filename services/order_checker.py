@@ -6,7 +6,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from utils.notifications import notify_admin
 from services.kaspi_api import get_orders
 from config.config import ORDER_CHECK_INTERVAL, ORDER_LOOKBACK_DAYS
-from config.settings import ORDER_LOOKBACK_DAYS
 
 
 async def safe_notify(bot, message: str, reply_markup=None):
@@ -185,9 +184,10 @@ async def order_check_scheduler(bot):
     """
     Планировщик регулярной проверки новых заказов
     """
+    logger.info('⏳ Запуск планировщика проверки заказов (каждые %s сек)', ORDER_CHECK_INTERVAL)
     while True:
         try:
             await show_new_orders(bot)
         except Exception as e:
-            await safe_notify(bot, f"❌ Ошибка в планировщике: {e}")
+            logger.exception(f'Ошибка в планировщике заказов: {e}')
         await asyncio.sleep(ORDER_CHECK_INTERVAL)

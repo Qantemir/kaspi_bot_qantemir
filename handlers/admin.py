@@ -2,14 +2,13 @@ from aiogram import Router, types, F
 from aiogram.fsm.context import FSMContext
 from database.db import db
 from database.models import PRODUCTS_COLLECTION
-from config.config import ADMIN_ID
+from config.config import ADMIN_ID, ORDER_NOTIFY_ENABLED, ORDER_CHECK_INTERVAL, PRICE_CHECK_INTERVAL, NOTIFY_IF_NOT_TOP1
 from services.order_checker import  order_check_scheduler, show_new_orders
 from utils.keyboards import main_menu_kb, prices_menu_kb, prices_interval_kb, invoices_menu_kb, settings_menu_kb, cancel_kb, confirm_kb
 from loguru import logger
 import asyncio
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import StatesGroup, State
-from config.settings import ORDER_NOTIFY_ENABLED, ORDER_CHECK_INTERVAL, PRICE_CHECK_INTERVAL, NOTIFY_IF_NOT_TOP1
 from datetime import datetime, timedelta
 
 router = Router()
@@ -196,7 +195,7 @@ async def prices_menu(message: types.Message, state: FSMContext):
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.clear()
-    await message.answer('📉 <b>Раздел «Цены»</b>', reply_markup=prices_menu_kb())
+    await message.answer('�� <b>Раздел «Цены»</b>', reply_markup=prices_menu_kb())
 
 @router.message(F.text == '📄 Накладные')
 async def invoices_menu(message: types.Message, state: FSMContext):
