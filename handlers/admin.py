@@ -447,7 +447,7 @@ async def process_download_invoice_callback(callback: CallbackQuery):
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
-        await callback.message.answer(f'❌ Ошибка при скачивании накладной: {type(e).__name__}: {e}\nTraceback:\n{tb[:500]}')
+        await callback.message.answer(f'❌ Ошибка при скачивании накладной: {type(e).__name__}: {e}\nTraceback:\n{tb[:500]}') 
 
 @router.callback_query(F.data.startswith('give_order:'))
 async def process_give_order_callback(callback: CallbackQuery, state: FSMContext):
