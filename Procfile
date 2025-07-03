@@ -1,1 +1,2 @@
-web: python3 bot.py
+[start]
+cmd = "python bot.py"
