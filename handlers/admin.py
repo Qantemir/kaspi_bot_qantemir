@@ -7,9 +7,14 @@ from services.order_checker import  order_check_scheduler, show_new_orders
 from utils.keyboards import main_menu_kb, prices_menu_kb, prices_interval_kb, invoices_menu_kb, settings_menu_kb, cancel_kb, confirm_kb
 from loguru import logger
 import asyncio
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputFile, BufferedInputFile
 from aiogram.fsm.state import StatesGroup, State
 from datetime import datetime, timedelta
+from services.invoice_service import create_invoice, download_invoice_pdf
+from services.kaspi_api import get_orders
+import io
+import mimetypes
+from services.kaspi_order_complete import send_order_code, complete_order
 
 router = Router()
 
@@ -195,7 +200,7 @@ async def prices_menu(message: types.Message, state: FSMContext):
         await message.answer('⛔️ Доступ запрещён')
         return
     await state.clear()
-    await message.answer('�� <b>Раздел «Цены»</b>', reply_markup=prices_menu_kb())
+    await message.answer('📉 <b>Раздел «Цены»</b>', reply_markup=prices_menu_kb())
 
 @router.message(F.text == '📄 Накладные')
 async def invoices_menu(message: types.Message, state: FSMContext):
@@ -322,8 +327,10 @@ async def create_invoice_handler(message: types.Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer('⛔️ Доступ запрещён')
         return
-    # TODO: Реализовать формирование накладной
-    await message.answer('🧾 Накладная сформирована. [Скачать PDF]', reply_markup=invoices_menu_kb())
+    # Запрашиваем у пользователя ID заказа
+    await message.answer('Введите ID заказа для формирования накладной:')
+    # Здесь можно реализовать FSM для ожидания ввода ID, либо для простоты — ожидать следующий текст как ID заказа
+    # Для примера реализуем FSM ниже, если нужно — доработаем
 
 @router.message(F.text == '⬇️ Скачать все накладные')
 async def download_all_invoices(message: types.Message):
@@ -384,3 +391,113 @@ async def orders_menu_kb():
     )
 
 # Функция init_all_settings больше не нужна, так как все настройки теперь в config/settings.py 
+
+@router.callback_query(F.data.startswith('create_invoice:'))
+async def process_create_invoice_callback(callback: CallbackQuery):
+    # Проверяем, что пользователь - администратор
+    if not callback.from_user or callback.from_user.id != ADMIN_ID:
+        await callback.answer('⛔️ Доступ запрещён', show_alert=True)
+        return
+    order_id = callback.data.split(':', 1)[1]
+    await callback.answer('Формирую накладную...')
+    result = await create_invoice(order_id)
+    if result.get('success', True) and (not result.get('error')):
+        await callback.message.answer(f'🧾 Накладная для заказа {order_id} успешно сформирована!')
+    else:
+        await callback.message.answer(f'❌ Ошибка при формировании накладной для заказа {order_id}: {result.get("error", result)}')
+
+@router.callback_query(F.data.startswith('download_invoice:'))
+async def process_download_invoice_callback(callback: CallbackQuery):
+    # Проверяем, что пользователь - администратор
+    if not callback.from_user or callback.from_user.id != ADMIN_ID:
+        await callback.answer('⛔️ Доступ запрещён', show_alert=True)
+        return
+    order_id = callback.data.split(':', 1)[1]
+    await callback.answer('Скачиваю накладную...')
+    # Получаем заказ по order_id
+    orders = await get_orders()
+    order = next((o for o in orders if o.get('order_id') == order_id or o.get('code') == order_id), None)
+    if not order:
+        await callback.message.answer(f'❌ Заказ {order_id} не найден.')
+        return
+    waybill_url = order.get('waybill')
+    if not waybill_url:
+        # Попробуем достать из kaspiDelivery, если есть
+        waybill_url = order.get('kaspiDelivery', {}).get('waybill')
+    if not waybill_url:
+        await callback.message.answer(f'❌ У заказа {order_id} нет PDF накладной.')
+        return
+    try:
+        pdf_bytes = await download_invoice_pdf(waybill_url)
+        if not pdf_bytes or len(pdf_bytes) < 1000:
+            await callback.message.answer(f'❌ Ошибка: файл накладной пустой или слишком маленький (размер: {len(pdf_bytes) if pdf_bytes else 0} байт).')
+            return
+        mime = mimetypes.guess_type(f'waybill_{order_id}.pdf')[0]
+        if mime != 'application/pdf':
+            # Попробуем декодировать первые 200 символов как текст
+            preview = ''
+            try:
+                preview = pdf_bytes[:200].decode(errors='replace')
+            except Exception:
+                preview = str(pdf_bytes[:200])
+            await callback.message.answer(f'❌ Ошибка: скачанный файл не PDF (MIME: {mime}).\nПервые 200 символов ответа:\n{preview}')
+            return
+        file_obj = BufferedInputFile(pdf_bytes, filename=f'waybill_{order_id}.pdf')
+        await callback.message.answer_document(file_obj)
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        await callback.message.answer(f'❌ Ошибка при скачивании накладной: {type(e).__name__}: {e}\nTraceback:\n{tb[:500]}')
+
+@router.callback_query(F.data.startswith('give_order:'))
+async def process_give_order_callback(callback: CallbackQuery, state: FSMContext):
+    # Проверяем, что пользователь - администратор
+    if not callback.from_user or callback.from_user.id != ADMIN_ID:
+        if callback.message:
+            await callback.answer('⛔️ Доступ запрещён', show_alert=True)
+        return
+    order_id = callback.data.split(':', 1)[1] if callback.data and ':' in callback.data else None
+    if not order_id:
+        if callback.message:
+            await callback.message.answer('❌ Не удалось определить ID заказа.')
+        return
+    # Получаем список заказов, ищем нужный
+    orders = await get_orders()
+    order = next((o for o in orders if o.get('order_id') == order_id or o.get('code') == order_id), None)
+    if not order:
+        if callback.message:
+            await callback.message.answer(f'❌ Заказ {order_id} не найден.')
+        return
+    order_code = order.get('code')
+    # 1. Отправляем код клиенту через Kaspi API
+    result = await send_order_code(order_id, order_code)
+    if result.get('error'):
+        if callback.message:
+            await callback.message.answer(f'❌ Ошибка при отправке кода клиенту: {result["error"]}')
+        return
+    if callback.message:
+        await callback.message.answer('✅ Код для выдачи заказа отправлен клиенту в Kaspi.kz. Попросите клиента назвать код из приложения и введите его сюда:')
+    # Ждём следующий текст от админа как код
+    await state.update_data(order_id=order_id, order_code=order_code)
+    await state.set_state('await_security_code')
+
+@router.message(F.state == 'await_security_code')
+async def process_security_code(message: types.Message, state: FSMContext):
+    if not message.from_user or message.from_user.id != ADMIN_ID:
+        await message.answer('⛔️ Доступ запрещён')
+        return
+    if message.text == '❌ Отмена':
+        await state.clear()
+        await message.answer('❌ Действие отменено.', reply_markup=main_menu_kb())
+        return
+    data = await state.get_data()
+    order_id = data.get('order_id')
+    order_code = data.get('order_code')
+    security_code = message.text.strip()
+    # 2. Завершаем заказ с кодом клиента
+    result = await complete_order(order_id, order_code, security_code)
+    if result.get('error'):
+        await message.answer(f'❌ Ошибка при завершении заказа: {result["error"]}', reply_markup=main_menu_kb())
+    else:
+        await message.answer(f'✅ Заказ {order_code} успешно выдан! Статус: {result.get("data", {}).get("attributes", {}).get("status", "-")}', reply_markup=main_menu_kb())
+    await state.clear() 

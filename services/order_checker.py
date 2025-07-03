@@ -36,21 +36,20 @@ def format_order_date(order_date) -> str:
 
 def format_address(address: dict) -> str:
     """
-    Форматирует адрес в строку
+    Форматирует адрес Kaspi в строку
     """
     if not address:
-        return ""
+        return "-"
     parts = []
-    if address.get('city'):
-        parts.append(address['city'])
-    if address.get('street'):
-        parts.append(address['street'])
-    if address.get('house'):
-        parts.append(f"д. {address['house']}")
+    if address.get('town'):
+        parts.append(address['town'])
+    if address.get('streetName'):
+        parts.append(address['streetName'])
+    if address.get('streetNumber'):
+        parts.append(f"{address['streetNumber']}")
     if address.get('apartment'):
         parts.append(f"кв. {address['apartment']}")
     return ", ".join(parts)
-
 
 def format_products(products: list, fallback: str = 'Товар') -> str:
     """
@@ -95,10 +94,8 @@ async def check_orders_by_states(bot, states, date_from=None):
             if not orders:
                 continue
             for order in orders:
-                # Для KASPI_DELIVERY фильтруем как раньше
                 if state == 'KASPI_DELIVERY' and (order.get('assembled') is not False or order.get('courierTransmissionDate') is not None):
                     continue
-                # Для DELIVERY можно добавить свои фильтры при необходимости
                 await show_order_notification(bot, order)
                 found_any = True
         except Exception as e:
@@ -122,7 +119,7 @@ async def show_order_notification(bot, order):
     order_date_str = format_order_date(order.get('date'))
     customer = order.get('customer', {})
     customer_name = f"{customer.get('firstName', '')} {customer.get('lastName', '')}".strip() or 'Клиент'
-    customer_phone = customer.get('phone', '')
+    customer_phone = customer.get('cellPhone', '')
     customer_email = customer.get('email', '')
     products_text = format_products(order.get('products', []), order.get('product_name', 'Товар'))
     total_price = order.get('totalPrice', order.get('price', 0))
@@ -146,8 +143,6 @@ async def show_order_notification(bot, order):
     )
     if customer_phone:
         message += f"📞 Телефон: {customer_phone}\n"
-    if customer_email:
-        message += f"📧 Email: {customer_email}\n"
     message += (
         f"\n📋 <b>Статус:</b> {status}\n"
         f"🚚 <b>Тип доставки:</b> {delivery_text}\n"
@@ -157,16 +152,13 @@ async def show_order_notification(bot, order):
     if address_text:
         message += f"🏠 <b>Адрес:</b> {address_text}\n"
     message += (
-        f"💳 <b>Оплата:</b> {payment_text}\n"
         f"📅 <b>Дата:</b> {order_date_str}"
         f"{comment_text}"
         f"{signature_text}"
     )
     assembled = order.get('assembled')
     courier_transmission = order.get('courierTransmissionDate')
-    # Логика кнопок
     if state == 'DELIVERY':
-        # Только кнопка "Выдать заказ"
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text='Выдать заказ', callback_data=f'give_order:{order.get("order_id") or order.get("code")}')
         ]])

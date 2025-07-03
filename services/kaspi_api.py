@@ -4,7 +4,6 @@ from config.config import KASPI_API
 from loguru import logger
 from datetime import datetime, timedelta
 
-# Правильный URL согласно документации
 KASPI_API_URL = 'https://kaspi.kz/shop/api/v2/'
 
 headers = {
@@ -14,26 +13,79 @@ headers = {
     'User-Agent': 'KaspiBot/1.0',
 }
 
+
+async def get_order_products(order_data: dict) -> list[dict]:
+    """
+    Загружает список товаров по ссылке order['relationships']['entries']['links']['related']
+    """
+    try:
+        related_url = (
+            order_data.get('relationships', {})
+            .get('entries', {})
+            .get('links', {})
+            .get('related')
+        )
+
+        if not related_url:
+            logger.warning(f"Нет ссылки на товары для заказа {order_data.get('id')}")
+            return []
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(related_url, headers=headers)
+            response.raise_for_status()
+            data = response.json().get("data", [])
+
+            products = []
+            for item in data:
+                attr = item.get("attributes", {})
+                product = attr.get("product", {})
+                products.append({
+                    "name": product.get("name", "Товар"),
+                    "quantity": attr.get("quantity", 1),
+                    "price": attr.get("totalPrice", 0),
+                })
+
+            return products
+    except Exception as e:
+        logger.error(f"❌ Ошибка при получении товаров для заказа {order_data.get('id')}: {e}")
+        return []
+
+
+async def get_product_name(product_id: str):
+    url = f"{KASPI_API_URL}masterproducts/{product_id}"
+    async with httpx.AsyncClient(timeout=10) as client:
+        try:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get('data', {}).get('attributes', {}).get('name', 'Товар')
+        except Exception:
+            return 'Товар'
+
+aKASPI_API_URL = 'https://kaspi.kz/shop/api/v2/'
+
+headers = {
+    'Content-Type': 'application/vnd.api+json',
+    'X-Auth-Token': KASPI_API,
+    'Accept': 'application/vnd.api+json',
+    'User-Agent': 'KaspiBot/1.0',
+}
+
 async def get_orders(page=0, size=20, state=None, status=None, date_from=None, date_to=None, delivery_type=None):
-    """
-    Получение заказов согласно официальной документации Kaspi API
-    """
     url = KASPI_API_URL + 'orders'
-    
-    # По умолчанию получаем заказы за последние 3 дня (max для Kaspi API)
+
     if not date_from:
         date_from_dt = datetime.now() - timedelta(days=3)
     else:
         date_from_dt = datetime.strptime(date_from, '%Y-%m-%d')
     date_from_ms = int(date_from_dt.timestamp() * 1000)
-    
+
     params = {
         'page[number]': page,
         'page[size]': size,
-        'filter[orders][creationDate][$ge]': date_from_ms,  # Обязательный фильтр
+        'filter[orders][creationDate][$ge]': date_from_ms,
     }
-    
-    # Добавляем дополнительные фильтры
+
     if state:
         params['filter[orders][state]'] = state
     if status:
@@ -41,67 +93,60 @@ async def get_orders(page=0, size=20, state=None, status=None, date_from=None, d
     if delivery_type:
         params['filter[orders][deliveryType]'] = delivery_type
     if date_to:
-        # Если передан date_to, преобразуем в миллисекунды
         date_to_dt = datetime.strptime(date_to, '%Y-%m-%d')
         date_to_ms = int(date_to_dt.timestamp() * 1000)
         params['filter[orders][creationDate][$le]'] = date_to_ms
-    
+
     logger.info(f'Запрос заказов через Kaspi API: {url}')
     logger.info(f'Параметры запроса: {params}')
-    logger.info(f'Заголовки: {dict(headers)}')
-    
-    # Проверяем, что API ключ настроен
+
     if not KASPI_API:
         logger.error('KASPI_API не настроен! Добавьте KASPI_API в файл .env')
         return []
-    
-    # Увеличиваем таймаут до 30 секунд
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             resp = await client.get(url, headers=headers, params=params)
             logger.info(f'Получен ответ от API: статус {resp.status_code}')
             logger.info(f'Текст ответа от Kaspi API: {resp.text}')
-            
-            if resp.status_code == 401:
-                logger.error('Ошибка авторизации: неверный API ключ')
+
+            if resp.status_code in [401, 403, 404]:
+                logger.error(f'Ошибка API: {resp.status_code}')
                 return []
-            elif resp.status_code == 403:
-                logger.error('Ошибка доступа: недостаточно прав для API')
-                return []
-            elif resp.status_code == 404:
-                logger.error('API endpoint не найден')
-                return []
-            
+
             resp.raise_for_status()
-            logger.info('Успешно получены заказы через API')
-            
-            # Парсим ответ согласно структуре документации
             data = resp.json()
-            logger.info(f'Структура ответа: {list(data.keys()) if isinstance(data, dict) else "не dict"}')
-            
+
             orders = []
-            
+
             if 'data' in data:
                 for order_data in data['data']:
                     attributes = order_data.get('attributes', {})
-                    
-                    # Получаем информацию о товарах из entries
-                    entries = attributes.get('entries', [])
+                    order_id = order_data.get('id')
+
                     products_info = []
-                    if entries:
-                        for entry in entries:
-                            product_name = entry.get('product', {}).get('name', 'Товар')
-                            quantity = entry.get('quantity', 1)
-                            price = entry.get('price', 0)
-                            products_info.append({
-                                'name': product_name,
-                                'quantity': quantity,
-                                'price': price
-                            })
-                    
-                    # Формируем полную информацию о заказе
+                    entries_url = f"{KASPI_API_URL}orders/{order_id}/entries"
+                    entries_resp = await client.get(entries_url, headers=headers)
+                    entries = entries_resp.json().get("data", [])
+
+                    for entry in entries:
+                        entry_id = entry['id']
+                        quantity = entry['attributes'].get('quantity', 1)
+                        price = entry['attributes'].get('totalPrice', 0)
+
+                        product_resp = await client.get(f"{KASPI_API_URL}orderentries/{entry_id}/product", headers=headers)
+                        name = "Товар"
+                        if product_resp.status_code == 200:
+                            name = product_resp.json().get("data", {}).get("attributes", {}).get("name", "Товар")
+
+                        products_info.append({
+                            'name': name,
+                            'quantity': quantity,
+                            'price': price
+                        })
+
                     order = {
-                        'order_id': order_data.get('id'),
+                        'order_id': order_id,
                         'code': attributes.get('code'),
                         'product_name': products_info[0]['name'] if products_info else 'Товар',
                         'products': products_info,
@@ -119,152 +164,24 @@ async def get_orders(page=0, size=20, state=None, status=None, date_from=None, d
                         'deliveryAddress': attributes.get('deliveryAddress', {}),
                         'pickupPoint': attributes.get('pickupPoint', {}),
                         'comment': attributes.get('comment', ''),
-                        'entries': entries,
                         'waybillNumber': attributes.get('waybillNumber'),
+                        'assembled': attributes.get('assembled'),
+                        'courierTransmissionDate': attributes.get('kaspiDelivery', {}).get('courierTransmissionDate'),
+                        'waybill': attributes.get('kaspiDelivery', {}).get('waybill'),
                     }
                     orders.append(order)
                     logger.info(f'Обработан заказ: {order["code"]} - {order["status"]} - {order["state"]}')
             else:
                 logger.warning('В ответе API нет поля "data"')
-                logger.info(f'Полный ответ API: {data}')
-            
+
             return orders
-            
+
         except httpx.TimeoutException:
             logger.error('Таймаут при запросе к Kaspi API (30 секунд)')
             return []
         except httpx.HTTPStatusError as e:
-            logger.error(f'HTTP ошибка при запросе к Kaspi API: {e.response.status_code}')
-            logger.error(f'Текст ответа: {e.response.text}')
+            logger.error(f'HTTP ошибка: {e.response.status_code}')
             return []
         except Exception as e:
-            logger.error(f'Ошибка при получении заказов через API: {e}')
-            logger.error(f'Тип ошибки: {type(e).__name__}')
+            logger.error(f'Ошибка при получении заказов: {e}')
             return []
-
-
-async def update_product_price(product_id: str, new_price: int):
-    url = KASPI_API_URL + f'products/{product_id}/price'
-    data = {"price": new_price}
-    logger.info(f'Запрос обновления цены товара {product_id} через API: {new_price}')
-    
-    if not KASPI_API:
-        logger.error('KASPI_API не настроен! Добавьте KASPI_API в файл .env')
-        return {'success': False, 'error': 'no_api_key'}
-    
-    async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            resp = await client.put(url, headers=headers, json=data)
-            resp.raise_for_status()
-            logger.info('Цена товара успешно обновлена через API')
-            return resp.json()
-        except httpx.TimeoutException:
-            logger.error('Таймаут при обновлении цены товара')
-            return {'success': False, 'error': 'timeout'}
-        except Exception as e:
-            logger.error(f'Ошибка при обновлении цены товара через API: {e}')
-            raise
-
-async def create_invoice(order_id: str):
-    url = KASPI_API_URL + f'orders/{order_id}/invoice'
-    logger.info(f'Запрос создания накладной для заказа {order_id} через API')
-    
-    if not KASPI_API:
-        logger.error('KASPI_API не настроен! Добавьте KASPI_API в файл .env')
-        return {'success': False, 'error': 'no_api_key'}
-    
-    async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            resp = await client.post(url, headers=headers)
-            resp.raise_for_status()
-            logger.info('Накладная успешно создана через API')
-            return resp.json()
-        except httpx.TimeoutException:
-            logger.error('Таймаут при создании накладной')
-            return {'success': False, 'error': 'timeout'}
-        except Exception as e:
-            logger.error(f'Ошибка при создании накладной через API: {e}')
-            raise
-
-async def get_products():
-    url = KASPI_API_URL + 'products'
-    logger.info(f'Запрос списка товаров через Kaspi API: {url}')
-    
-    # Проверяем, что API ключ настроен
-    if not KASPI_API:
-        logger.error('KASPI_API не настроен! Добавьте KASPI_API в файл .env')
-        return []
-    
-    async with httpx.AsyncClient(timeout=10) as client:
-        try:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            logger.info('Успешно получен список товаров через API')
-            return resp.json()
-        except httpx.TimeoutException:
-            logger.error('Таймаут при запросе к Kaspi API')
-            return []
-        except httpx.HTTPStatusError as e:
-            logger.error(f'HTTP ошибка при запросе к Kaspi API: {e.response.status_code} - {e.response.text}')
-            return []
-        except Exception as e:
-            logger.error(f'Ошибка при получении списка товаров через API: {e}')
-            return []
-
-async def test_api_connection():
-    """
-    Тестирует подключение к Kaspi API
-    """
-    logger.info('Тестирование подключения к Kaspi API...')
-    
-    if not KASPI_API:
-        logger.error('❌ KASPI_API не настроен! Добавьте KASPI_API в файл .env')
-        return False
-    
-    url = KASPI_API_URL + 'orders'
-    # Фильтр по дате в миллисекундах за последние 14 дней
-    date_from_dt = datetime.now() - timedelta(days=14)
-    date_from_ms = int(date_from_dt.timestamp() * 1000)
-    params = {
-        'page[number]': 0,
-        'page[size]': 1,
-        'filter[orders][creationDate][$ge]': date_from_ms,
-    }
-    logger.info(f'Тестовый запрос: {url}')
-    logger.info(f'API ключ: {KASPI_API[:10]}...' if len(KASPI_API) > 10 else 'API ключ: слишком короткий')
-    logger.info(f'Фильтр по дате (ms): с {date_from_ms}')
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.get(url, headers=headers, params=params)
-            logger.info(f'Ответ API: статус {resp.status_code}')
-            
-            if resp.status_code == 200:
-                logger.info('✅ Подключение к Kaspi API успешно!')
-                data = resp.json()
-                logger.info(f'Структура ответа: {list(data.keys()) if isinstance(data, dict) else "не dict"}')
-                if 'data' in data:
-                    logger.info(f'Найдено заказов: {len(data["data"])}')
-                else:
-                    logger.info('Заказы не найдены')
-                return True
-            elif resp.status_code == 401:
-                logger.error('❌ Ошибка авторизации: неверный API ключ')
-                return False
-            elif resp.status_code == 403:
-                logger.error('❌ Ошибка доступа: недостаточно прав для API')
-                return False
-            elif resp.status_code == 404:
-                logger.error('❌ API endpoint не найден')
-                return False
-            else:
-                logger.error(f'❌ Неожиданный статус ответа: {resp.status_code}')
-                logger.error(f'Текст ответа: {resp.text}')
-                return False
-                
-        except httpx.TimeoutException:
-            logger.error('❌ Таймаут при подключении к Kaspi API')
-            return False
-        except Exception as e:
-            logger.error(f'❌ Ошибка при тестировании API: {e}')
-            return False 
