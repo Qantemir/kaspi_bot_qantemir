@@ -94,7 +94,7 @@ async def check_orders_by_states(bot, states, date_from=None):
             if not orders:
                 continue
             for order in orders:
-                if state == 'KASPI_DELIVERY' and (order.get('assembled') is not False or order.get('courierTransmissionDate') is not None):
+                if state == 'KASPI_DELIVERY' and order.get('courierTransmissionDate') is not None:
                     continue
                 await show_order_notification(bot, order)
                 found_any = True
@@ -144,12 +144,11 @@ async def show_order_notification(bot, order):
     if customer_phone:
         message += f"📞 Телефон: {customer_phone}\n"
     message += (
-        f"\n📋 <b>Статус:</b> {status}\n"
-        f"🚚 <b>Тип доставки:</b> {delivery_text}\n"
+        f"\n🚚 <b>Тип доставки:</b> {delivery_text}\n"
     )
     if delivery_type:
         message += f"📍 <b>Способ доставки:</b> {delivery_type}\n"
-    if address_text:
+    if address_text and state != 'KASPI_DELIVERY':
         message += f"🏠 <b>Адрес:</b> {address_text}\n"
     message += (
         f"📅 <b>Дата:</b> {order_date_str}"
@@ -170,10 +169,15 @@ async def show_order_notification(bot, order):
             ]])
             await safe_notify(bot, message, reply_markup=kb)
         elif assembled is True and courier_transmission is None:
-            kb = InlineKeyboardMarkup(inline_keyboard=[[
-                InlineKeyboardButton(text='Скачать накладную', callback_data=f'download_invoice:{order.get("order_id") or order.get("code")}')
-            ]])
-            await safe_notify(bot, message, reply_markup=kb)
+            waybill_url = order.get('waybill')
+            if waybill_url:
+                message += f"\n\n<a href=\"{waybill_url}\">📄 Скачать накладную (PDF)</a>"
+                await safe_notify(bot, message)
+            else:
+                kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text='Скачать накладную', callback_data=f'download_invoice:{order.get("order_id") or order.get("code")}')
+                ]])
+                await safe_notify(bot, message, reply_markup=kb)
         else:
             await safe_notify(bot, message)
     else:
