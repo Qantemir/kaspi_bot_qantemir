@@ -35,6 +35,32 @@
    python bot.py
    ```
 
+## Деплой на realWay
+
+1. Убедитесь, что у вас есть файл `.env` с переменными окружения:
+   - `BOT_TOKEN` — токен вашего Telegram-бота
+   - `ADMIN_ID` — Telegram ID администратора
+
+2. Установите зависимости:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Для запуска локально:
+   ```bash
+   python main.py
+   ```
+
+4. Для деплоя на realWay:
+   - Убедитесь, что в корне проекта есть файлы `Procfile`, `requirements.txt`, `runtime.txt`.
+   - В Procfile должна быть строка:
+     ```
+     web: python main.py
+     ```
+   - Загрузите проект на realWay.
+
+5. После деплоя бот автоматически запустится.
+
 ## Команды
 
 - `/start` - Запуск бота (доступно всем пользователям)
