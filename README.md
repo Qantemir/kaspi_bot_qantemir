@@ -32,7 +32,7 @@
 
 6. **Запустите бота:**
    ```bash
-   python bot.py
+   python main.py
    ```
 
 ## Деплой на realWay
